@@ -1,54 +1,63 @@
-# Notification Microservice Assignment
+# Notification Microservice
 
-This repo keeps the backend simple for students. The backend creates notification payloads and returns them in API responses. It does not store notifications and does not communicate with `notification-service`.
+A backend that queues email notifications using **BullMQ** and **Redis**. Controllers enqueue jobs; a separate worker process sends emails via Resend.
 
-## Structure
+## How it works
 
-```txt
-root/
-├── backend/
-│   ├── prisma/schema.prisma
-│   ├── src/controllers/index.ts
-│   ├── src/middleware/auth.ts
-│   ├── src/routes/index.ts
-│   └── src/index.ts
-├── notification-service/
-└── README.md
+```
+API (controllers) → BullMQ queues (Redis) → Workers (engine) → Resend
 ```
 
-## Backend Routes
+1. A route triggers a notification (signup, wallet onramp, marketing email).
+2. The controller pushes a job to the matching BullMQ queue.
+3. The worker picks up the job, renders an HTML template, and sends the email.
 
-- `POST /auth/signup`
+## Queues
+
+Three separate queues, one per notification type:
+
+| Queue | Template | Trigger | Priority |
+|---|---|---|---|
+| `emails` | `signup-success` | User signup | 1 |
+| `wallet-emails` | `wallet-onramp-success` | Wallet onramp | 0 (highest) |
+| `marketing-emails` | `marketing-email` | Admin broadcast | 2 (lowest) |
+
+Lower priority number = processed first. Wallet emails beat welcome emails, which beat marketing.
+
+Each job retries up to 3 times with exponential backoff (2s delay).
+
+## Routes
+
+- `POST /auth/signup` — welcome email
 - `POST /auth/login`
-- `POST /wallet/onramp`
-- `POST /email/marketing`
+- `POST /wallet/onramp` — requires JWT
+- `POST /email/marketing` — requires admin JWT
 - `GET /health`
 
-`/wallet/onramp` needs a JWT token. `/email/marketing` needs an `ADMIN` user token.
-
-## Notification Payloads
-
-The backend returns payloads like this:
-
-```json
-{
-  "id": 1,
-  "user": 12,
-  "template": "signup-success",
-  "service": "EMAIL",
-  "priority": 1
-}
-```
-
-These payloads are not stored in the database.
-
 ## Setup
+
+Requires Redis running on `localhost:6379`.
 
 ```bash
 cd backend
 bun install
 bunx prisma generate
-bun run dev
+cp .env.example .env   # add RESEND_API_KEY, JWT_SECRET, DATABASE_URL
 ```
 
-Create `backend/.env` from `backend/.env.example`.
+Run in two terminals:
+
+```bash
+bun run dev      # API server
+bun run engine   # BullMQ workers
+```
+
+## Project structure
+
+```txt
+backend/
+├── src/controllers/          # API routes enqueue jobs here
+├── src/microservices/        # BullMQ queue setup
+├── engine/                   # Workers that process queues
+notification-service/template/  # HTML email templates
+```
