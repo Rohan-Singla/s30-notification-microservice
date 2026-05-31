@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { prisma } from "../../db";
+import { add_email } from "../microservices/notificationcontroller";
 
 const signupSchema = z.object({
   email: z.string().email(),
@@ -17,10 +18,22 @@ const loginSchema = z.object({
 
 let notificationId = 1;
 
-function createSignupNotification(userId: number) {
-  return {
+async function createSignupNotification(userId: number , email : string) {
+
+  const data = {
     id: notificationId,
+    email : email,
     user: userId,
+    template: "signup-success",
+    service: "EMAIL" as const,
+    priority: 1,
+  }
+
+  const notification = await add_email(data);
+
+  return {
+    id: notification.id,
+    user: notification.name,
     template: "signup-success",
     service: "EMAIL" as const,
     priority: 1,
@@ -43,7 +56,7 @@ export async function signup(req: Request, res: Response) {
       data: { email: body.email, password: hashedPassword, role: body.role }});
 
     //TODO: Send notification to user 
-    createSignupNotification(user.id);
+    const result = await createSignupNotification(user.id , body.email);
 
     res.status(201).json({
       message: "Signup successful",
@@ -51,6 +64,9 @@ export async function signup(req: Request, res: Response) {
       notification: notificationId,
     });
   } catch (error) {
+
+    console.error("SIGNUP ERROR:", error);
+
     if (error instanceof z.ZodError) {
       res.status(400).json({ message: "Validation failed", errors: error.flatten().fieldErrors });
       return;
