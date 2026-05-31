@@ -1,6 +1,8 @@
 import type { Response } from "express";
 import { z } from "zod";
 import type { AuthRequest } from "../middleware/auth";
+import { send_notification } from "../microservices/notificationcontroller";
+import { prisma } from "../../db";
 
 const marketingEmailSchema = z.object({
   subject: z.string().min(1),
@@ -9,28 +11,35 @@ const marketingEmailSchema = z.object({
 
 let notificationId = 1;
 
-function createMarketingNotification() {
-  return {
-    id: notificationId,
-    user: "ALL" as const,
-    template: "marketing-email",
-    service: "EMAIL" as const,
-    priority: 2,
-  };
-}
-
 export async function marketingEmail(req: AuthRequest, res: Response) {
   try {
-    notificationId++;
     const body = marketingEmailSchema.parse(req.body);
 
-    //TODO: Send notification to all users
-    createMarketingNotification();
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    notificationId++;
+
+    for (const user of users) {
+      await send_notification(
+        notificationId,
+        user.id,
+        user.email,
+        "marketing-email",
+        2,
+        { subject: body.subject, message: body.message },
+      );
+    }
 
     res.status(201).json({
       message: "Marketing email notification created",
       subject: body.subject,
       notification: notificationId,
+      recipients: users.length,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

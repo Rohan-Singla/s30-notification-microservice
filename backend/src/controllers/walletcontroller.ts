@@ -2,22 +2,13 @@ import type { Response } from "express";
 import { z } from "zod";
 import { prisma } from "../../db";
 import type { AuthRequest } from "../middleware/auth";
+import { send_notification } from "../microservices/notificationcontroller";
 
 const walletOnrampSchema = z.object({
   amount: z.coerce.number().positive(),
 });
 
 let notificationId = 1;
-
-function createWalletNotification(userId: number) {
-  return {
-    id: notificationId,
-    user: userId,
-    template: "wallet-onramp-success",
-    service: "EMAIL" as const,
-    priority: 0,
-  };
-}
 
 export async function walletOnramp(req: AuthRequest, res: Response) {
   try {
@@ -42,8 +33,14 @@ export async function walletOnramp(req: AuthRequest, res: Response) {
       },
     });
 
-    //TODO: Send notification to user
-    createWalletNotification(req.user.id);
+    await send_notification(
+      notificationId,
+      req.user.id,
+      req.user.email,
+      "wallet-onramp-success",
+      0,
+      { amount: body.amount },
+    );
 
     res.status(201).json({
       message: "Wallet onramp successful",
